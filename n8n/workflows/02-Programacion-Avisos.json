@@ -1,0 +1,125 @@
+{
+  "name": "UNISITE 02 - Inicio y vencimiento automático de avisos",
+  "nodes": [
+    {
+      "id": "51fb6c2f-dfa2-5f28-bcc5-e8b06e15fbf1",
+      "name": "Cada día a las 00:05",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -520,
+        60
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 0,
+              "triggerAtMinute": 5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "db781da4-7fdd-5f50-b42a-1660c32034d7",
+      "name": "Consultar avisos",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -290,
+        60
+      ],
+      "parameters": {
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REEMPLAZAR_ID_DE_GOOGLE_SHEET"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Avisos"
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "e8655186-fffc-5857-8b87-79363833da66",
+      "name": "Filtrar por fechas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -50,
+        60
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// El exportador publica ÚNICAMENTE avisos activos en la fecha local México.\n// No incluir borradores ni avisos futuros en el JSON que ve el visitante.\nconst rows = $input.all().map(item => item.json).filter(row => row && row.id);\nconst formatter = new Intl.DateTimeFormat('en-CA', {\n  timeZone: 'America/Mexico_City', year: 'numeric', month: '2-digit', day: '2-digit'\n});\nconst parts = formatter.formatToParts(new Date());\nconst today = `${parts.find(p => p.type === 'year').value}-${parts.find(p => p.type === 'month').value}-${parts.find(p => p.type === 'day').value}`;\nconst cleanUrl = (raw) => {\n  const value = String(raw || '').trim();\n  if (value.startsWith('/') && !value.startsWith('//')) return value;\n  try { const u = new URL(value); return ['https:', 'http:'].includes(u.protocol) ? u.toString() : ''; }\n  catch { return ''; }\n};\nconst avisos = rows.filter(r => {\n  const status = String(r.estado || '').trim().toLowerCase();\n  const start = String(r.inicio || '').slice(0,10);\n  const end = String(r.fin || '').slice(0,10);\n  return status === 'publicado' && (!start || start <= today) && (!end || end >= today);\n}).map(r => ({\n  id: String(r.id),\n  titulo: String(r.titulo || '').slice(0,110),\n  resumen: String(r.resumen || '').slice(0,230),\n  categoria: String(r.categoria || 'AVISO').slice(0,32),\n  imagen: cleanUrl(r.imagen),\n  enlace: cleanUrl(r.enlace),\n  fecha: String(r.inicio || '').slice(0,10),\n  orden: Number(r.orden) || 50\n})).filter(r => r.titulo).sort((a,b)=>a.orden-b.orden).slice(0,16);\nreturn [{ json: { actualizado: new Date().toISOString(), avisos } }];"
+      }
+    },
+    {
+      "id": "71466a92-9117-5823-b3d7-28728cafd82a",
+      "name": "Actualizar JSON público",
+      "type": "n8n-nodes-base.ftp",
+      "typeVersion": 1,
+      "position": [
+        190,
+        60
+      ],
+      "parameters": {
+        "protocol": "sftp",
+        "operation": "upload",
+        "path": "/public_html/unisite/data/avisos.json",
+        "fileContent": "={{ JSON.stringify($json, null, 2) }}",
+        "options": {},
+        "binaryData": false
+      }
+    }
+  ],
+  "connections": {
+    "Cada día a las 00:05": {
+      "main": [
+        [
+          {
+            "node": "Consultar avisos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar avisos": {
+      "main": [
+        [
+          {
+            "node": "Filtrar por fechas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtrar por fechas": {
+      "main": [
+        [
+          {
+            "node": "Actualizar JSON público",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Mexico_City"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": []
+}

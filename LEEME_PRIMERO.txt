@@ -1,0 +1,29 @@
+UNISITE LANDING VUE 3 / PRISMAKORE SOLUTIONS
+==========================================
+
+1) Abrir esta carpeta en Visual Studio Code.
+2) Ejecutar: npm install
+3) Ejecutar: npm run dev
+4) Abrir: http://localhost:5173/unisite/
+
+Para generar archivos de despliegue:
+   npm run build
+   Subir el CONTENIDO de dist/ a public_html/unisite/
+
+En docs/CONFIGURAR_N8N.md está el procedimiento para:
+ - administrar carrusel desde formulario privado n8n
+ - subir imágenes por SFTP sin recompilar el sitio
+ - Google Sheets de avisos/prospectos
+ - Turnstile con validación en n8n (nunca en cliente solamente)
+
+Archivos n8n importables: n8n/workflows/*.json
+
+IMPORTANTE: Este ZIP no tiene contraseñas ni secretos. Los formularios no
+registrarán prospectos hasta conectar n8n, Turnstile y aviso de privacidad.
+También falta aprobación institucional del logo y uso de fotos.
+
+Referencia de diseño: docs/UNISITE_HOME_DISENO_APROBADO_V3.png
+
+El proyecto se preparó en entorno sin acceso a registry.npmjs.org; por eso
+no se pudo instalar npm ni probar el build. Código, JSON y CSS pasaron
+las verificaciones estáticas documentadas.

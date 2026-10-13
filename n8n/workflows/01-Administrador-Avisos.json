@@ -1,0 +1,544 @@
+{
+  "name": "UNISITE 01 - Administrador de avisos (Form n8n + Sheets + SFTP)",
+  "nodes": [
+    {
+      "id": "9eec3de8-da93-55f8-9f9b-1a5716bfc790",
+      "name": "Formulario de avisos",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        -980,
+        100
+      ],
+      "parameters": {
+        "formTitle": "UNISITE | Administrador de avisos",
+        "formDescription": "Agrega o actualiza avisos. Para editar o desactivar, consulta primero el ID en Google Sheets. Acceso protegido.",
+        "authentication": "basicAuth",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Acción",
+              "fieldName": "accion",
+              "fieldType": "dropdown",
+              "requiredField": true,
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "publicar"
+                  },
+                  {
+                    "option": "guardar borrador"
+                  },
+                  {
+                    "option": "desactivar"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "ID del aviso (solo editar/desactivar)",
+              "fieldName": "id",
+              "fieldType": "text"
+            },
+            {
+              "fieldLabel": "Título",
+              "fieldName": "titulo",
+              "fieldType": "text"
+            },
+            {
+              "fieldLabel": "Resumen",
+              "fieldName": "resumen",
+              "fieldType": "textarea"
+            },
+            {
+              "fieldLabel": "Categoría",
+              "fieldName": "categoria",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "INSTITUCIONAL"
+                  },
+                  {
+                    "option": "ADMISIONES"
+                  },
+                  {
+                    "option": "OFERTA EDUCATIVA"
+                  },
+                  {
+                    "option": "EVENTOS"
+                  },
+                  {
+                    "option": "COMUNIDAD"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "Imagen JPG/PNG/WebP (opcional)",
+              "fieldName": "imagenArchivo",
+              "fieldType": "file",
+              "multipleFiles": false
+            },
+            {
+              "fieldLabel": "URL imagen (si ya existe)",
+              "fieldName": "imagenUrl",
+              "fieldType": "text"
+            },
+            {
+              "fieldLabel": "URL destino / enlace",
+              "fieldName": "enlace",
+              "fieldType": "text"
+            },
+            {
+              "fieldLabel": "Publicar desde (AAAA-MM-DD)",
+              "fieldName": "inicio",
+              "fieldType": "date"
+            },
+            {
+              "fieldLabel": "Publicar hasta (AAAA-MM-DD)",
+              "fieldName": "fin",
+              "fieldType": "date"
+            },
+            {
+              "fieldLabel": "Orden (menor primero)",
+              "fieldName": "orden",
+              "fieldType": "number"
+            }
+          ]
+        },
+        "options": {
+          "path": "unisite-gestor-avisos",
+          "buttonLabel": "Guardar aviso",
+          "ignoreBots": true,
+          "useWorkflowTimezone": true
+        }
+      },
+      "webhookId": "9a95df16-b6c7-5863-8190-da4014b252c3"
+    },
+    {
+      "id": "dce74329-ae58-504b-8276-cea03dc350e5",
+      "name": "Normalizar aviso",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -730,
+        100
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// IMPORTANTE: el formulario está protegido por Basic Auth.\nconst original = $input.first();\nconst r = original.json || {};\nconst text = (v,n) => String(v ?? '').trim().slice(0,n);\nconst accion = text(r.accion,40).toLowerCase();\nif (!['publicar','guardar borrador','desactivar'].includes(accion)) throw new Error('Acción no válida');\nconst codigo = text(r.id,60).replace(/[^a-zA-Z0-9_-]/g,'');\nif (accion === 'desactivar' && !codigo) throw new Error('Para desactivar, captura el ID actual del aviso');\nconst id = codigo || ('aviso-'+Date.now().toString(36)+'-'+Math.floor(Math.random()*10000).toString(36));\nconst binary = original.binary || {};\nconst key = Object.keys(binary)[0] || '';\nconst attached = key ? binary[key] : null;\nlet extension = '';\nif (attached) {\n  extension = ({ 'image/png':'png', 'image/jpeg':'jpg', 'image/webp':'webp' })[attached.mimeType] || '';\n  if (!extension) throw new Error('Solo se permiten imágenes JPG, PNG o WebP');\n  // El límite real de carga se controla en n8n / reverse proxy.\n}\nconst filename = `${id}-${Date.now()}.${extension}`;\nconst imagen = attached ? `https://ajsaavedra.com/unisite/avisos/${filename}` : text(r.imagenUrl,500);\nconst dateText = (v) => { const value=text(v,35).slice(0,10); return /^\\d{4}-\\d{2}-\\d{2}$/.test(value) ? value : ''; };\nreturn [{\n json:{ accion, id, titulo:text(r.titulo,110), resumen:text(r.resumen,230), categoria:text(r.categoria,32), imagen,\n enlace:text(r.enlace,500), inicio:dateText(r.inicio), fin:dateText(r.fin), orden:text(r.orden,4),\n estado: accion === 'desactivar' ? 'Desactivado' : accion === 'publicar' ? 'Publicado' : 'Borrador',\n tieneImagen:!!attached, nombreArchivo:filename },\n binary: attached ? { imagen:attached } : {}\n}];"
+      }
+    },
+    {
+      "id": "7b0948f7-d3a6-59b6-b5a6-45a10c707207",
+      "name": "Hay archivo nuevo",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -490,
+        100
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "bfa4f2dc-a86f-58e1-a38e-6138b762a358",
+              "leftValue": "={{ $json.tieneImagen }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "f5f992e4-a340-5f22-b12e-f528c201361e",
+      "name": "Subir imagen SFTP",
+      "type": "n8n-nodes-base.ftp",
+      "typeVersion": 1,
+      "position": [
+        -250,
+        -60
+      ],
+      "parameters": {
+        "protocol": "sftp",
+        "operation": "upload",
+        "path": "={{ '/public_html/unisite/avisos/' + $('Normalizar aviso').first().json.nombreArchivo }}",
+        "binaryPropertyName": "imagen",
+        "options": {},
+        "binaryData": true
+      }
+    },
+    {
+      "id": "9c70ff19-33f8-5e78-b4e5-f772f384cd71",
+      "name": "Leer avisos actuales",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -20,
+        120
+      ],
+      "parameters": {
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REEMPLAZAR_ID_DE_GOOGLE_SHEET"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Avisos"
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "b6a458f1-4916-5f4e-bef2-83a2586db8c3",
+      "name": "Combinar aviso anterior",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        120
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Si se edita o desactiva, conservar las columnas no enviadas.\nconst form = $('Normalizar aviso').first().json;\nconst rows = $input.all().map(i=>i.json);\nconst previous = rows.find(r=>String(r.id||'')===form.id) || null;\nif (form.accion === 'desactivar' && !previous) throw new Error('ID no encontrado en Google Sheets');\nconst current = (field) => form[field] === '' ? (previous?.[field] ?? '') : form[field];\nconst result = {\n id:form.id,\n titulo:current('titulo'),\n resumen:current('resumen'),\n categoria:current('categoria') || 'INSTITUCIONAL',\n imagen:current('imagen'),\n enlace:current('enlace'),\n inicio:current('inicio'),\n fin:current('fin'),\n orden:current('orden') || 50,\n estado:form.estado,\n actualizado:new Date().toISOString()\n};\nif (!result.titulo) throw new Error('Captura un título para crear un nuevo aviso');\nif (result.inicio && result.fin && result.fin < result.inicio) throw new Error('La fecha final es anterior a la inicial');\nreturn [{json:result}];"
+      }
+    },
+    {
+      "id": "e6d74403-4d40-50e4-a652-50b2f172d9f0",
+      "name": "Guardar aviso en Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        430,
+        120
+      ],
+      "parameters": {
+        "resource": "sheet",
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REEMPLAZAR_ID_DE_GOOGLE_SHEET"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Avisos"
+        },
+        "options": {},
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $json.id }}",
+            "titulo": "={{ $json.titulo }}",
+            "resumen": "={{ $json.resumen }}",
+            "categoria": "={{ $json.categoria }}",
+            "imagen": "={{ $json.imagen }}",
+            "enlace": "={{ $json.enlace }}",
+            "inicio": "={{ $json.inicio }}",
+            "fin": "={{ $json.fin }}",
+            "orden": "={{ $json.orden }}",
+            "estado": "={{ $json.estado }}",
+            "actualizado": "={{ $json.actualizado }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "titulo",
+              "displayName": "titulo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "resumen",
+              "displayName": "resumen",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "categoria",
+              "displayName": "categoria",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "imagen",
+              "displayName": "imagen",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "enlace",
+              "displayName": "enlace",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "inicio",
+              "displayName": "inicio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "fin",
+              "displayName": "fin",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "orden",
+              "displayName": "orden",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "estado",
+              "displayName": "estado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "actualizado",
+              "displayName": "actualizado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "8fc12a43-7219-515e-a2b8-cf14b37e61ee",
+      "name": "Leer avisos para publicar",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        670,
+        120
+      ],
+      "parameters": {
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REEMPLAZAR_ID_DE_GOOGLE_SHEET"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Avisos"
+        },
+        "options": {}
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "4469415c-6262-5cf2-91d1-b63a2d0a4771",
+      "name": "Crear JSON público",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        120
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// El exportador publica ÚNICAMENTE avisos activos en la fecha local México.\n// No incluir borradores ni avisos futuros en el JSON que ve el visitante.\nconst rows = $input.all().map(item => item.json).filter(row => row && row.id);\nconst formatter = new Intl.DateTimeFormat('en-CA', {\n  timeZone: 'America/Mexico_City', year: 'numeric', month: '2-digit', day: '2-digit'\n});\nconst parts = formatter.formatToParts(new Date());\nconst today = `${parts.find(p => p.type === 'year').value}-${parts.find(p => p.type === 'month').value}-${parts.find(p => p.type === 'day').value}`;\nconst cleanUrl = (raw) => {\n  const value = String(raw || '').trim();\n  if (value.startsWith('/') && !value.startsWith('//')) return value;\n  try { const u = new URL(value); return ['https:', 'http:'].includes(u.protocol) ? u.toString() : ''; }\n  catch { return ''; }\n};\nconst avisos = rows.filter(r => {\n  const status = String(r.estado || '').trim().toLowerCase();\n  const start = String(r.inicio || '').slice(0,10);\n  const end = String(r.fin || '').slice(0,10);\n  return status === 'publicado' && (!start || start <= today) && (!end || end >= today);\n}).map(r => ({\n  id: String(r.id),\n  titulo: String(r.titulo || '').slice(0,110),\n  resumen: String(r.resumen || '').slice(0,230),\n  categoria: String(r.categoria || 'AVISO').slice(0,32),\n  imagen: cleanUrl(r.imagen),\n  enlace: cleanUrl(r.enlace),\n  fecha: String(r.inicio || '').slice(0,10),\n  orden: Number(r.orden) || 50\n})).filter(r => r.titulo).sort((a,b)=>a.orden-b.orden).slice(0,16);\nreturn [{ json: { actualizado: new Date().toISOString(), avisos } }];"
+      }
+    },
+    {
+      "id": "4775daf1-20de-555c-8e08-6f613cd44392",
+      "name": "Publicar JSON por SFTP",
+      "type": "n8n-nodes-base.ftp",
+      "typeVersion": 1,
+      "position": [
+        1130,
+        120
+      ],
+      "parameters": {
+        "protocol": "sftp",
+        "operation": "upload",
+        "path": "/public_html/unisite/data/avisos.json",
+        "fileContent": "={{ JSON.stringify($json, null, 2) }}",
+        "options": {},
+        "binaryData": false
+      }
+    }
+  ],
+  "connections": {
+    "Formulario de avisos": {
+      "main": [
+        [
+          {
+            "node": "Normalizar aviso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar aviso": {
+      "main": [
+        [
+          {
+            "node": "Hay archivo nuevo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hay archivo nuevo": {
+      "main": [
+        [
+          {
+            "node": "Subir imagen SFTP",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Leer avisos actuales",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Subir imagen SFTP": {
+      "main": [
+        [
+          {
+            "node": "Leer avisos actuales",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer avisos actuales": {
+      "main": [
+        [
+          {
+            "node": "Combinar aviso anterior",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combinar aviso anterior": {
+      "main": [
+        [
+          {
+            "node": "Guardar aviso en Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar aviso en Sheets": {
+      "main": [
+        [
+          {
+            "node": "Leer avisos para publicar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer avisos para publicar": {
+      "main": [
+        [
+          {
+            "node": "Crear JSON público",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crear JSON público": {
+      "main": [
+        [
+          {
+            "node": "Publicar JSON por SFTP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Mexico_City"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": []
+}

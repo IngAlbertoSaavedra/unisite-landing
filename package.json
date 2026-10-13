@@ -1,0 +1,25 @@
+{
+  "name": "pks-unisite-landing",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Landing institucional UNISITE - PrismaKore Solutions",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "check:project": "node scripts/check-project.mjs",
+    "check:workflows": "node scripts/check-workflows.mjs"
+  },
+  "dependencies": {
+    "vue": "^3.5.18",
+    "vue-router": "^4.5.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.1",
+    "vite": "^7.1.3"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  }
+}

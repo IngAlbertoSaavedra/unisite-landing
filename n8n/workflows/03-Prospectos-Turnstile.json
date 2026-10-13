@@ -1,0 +1,492 @@
+{
+  "name": "UNISITE 03 - Prospectos + validación Turnstile",
+  "nodes": [
+    {
+      "id": "e5a1e230-581f-5a9c-afb1-7f42893737e3",
+      "name": "Webhook UNISITE",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -770,
+        50
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "unisite-prospectos",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "https://ajsaavedra.com"
+        }
+      },
+      "webhookId": "325c9ef6-077a-5f07-8222-abd15e66b47e"
+    },
+    {
+      "id": "004e32b4-084f-5065-b971-3fad10132396",
+      "name": "Validar solicitud",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -550,
+        50
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const incoming = $input.first().json || {};\nlet b = incoming.body || {};\nif (typeof b === 'string') {\n  b = Object.fromEntries(b.split('&').map(pair => {\n    const i = pair.indexOf('=');\n    const d = x => decodeURIComponent(String(x||'').replace(/\\+/g,' '));\n    return [d(pair.slice(0,i)),d(pair.slice(i+1))];\n  }));\n}\nconst t=(field,max) => String(b[field] ?? '').trim().slice(0,max);\nconst email=t('correo',160);\nconst phone=t('telefono',30).replace(/[^\\d+\\s()-]/g,'');\nconst token=t('turnstileToken',2048);\nconst tipo=t('tipo',30);\nconst honeypot=t('empresa',100);\nconst valido = !honeypot && ['informes','admisiones'].includes(tipo) &&\n t('nombre',110).length>=3 && /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email) &&\n phone.replace(/\\D/g,'').length>=10 && !!t('programa',180) &&\n t('consentimiento',10)==='true' && token.length>10 &&\n (tipo!=='admisiones' || !!t('nivel',70));\nreturn [{json:{valido,tipo,nombre:t('nombre',110),correo:email,telefono:phone,programa:t('programa',180),\n nivel:t('nivel',70),modalidad:t('modalidad',70),horario:t('horario',70),mensaje:t('mensaje',1200),\n origen:'PKS_UNISITE_LANDING',token}}];"
+      }
+    },
+    {
+      "id": "f60747c7-5a3f-55b8-ad03-56d948b409e4",
+      "name": "Datos completos",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        50
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "1a8431a6-f541-5fb6-80ae-454878b40420",
+              "leftValue": "={{ $json.valido }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "f61ce657-5ca0-51c7-b1bf-511d0ef2ccd7",
+      "name": "Verificar Cloudflare Turnstile",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -90,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ secret: $env.UNISITE_TURNSTILE_SECRET, response: $('Validar solicitud').first().json.token }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      }
+    },
+    {
+      "id": "c3d09390-aabe-51ae-bbb0-de90a5b0186e",
+      "name": "Captcha validado",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        140,
+        -80
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "26f23707-01d9-5421-898c-241f5460cb5b",
+              "leftValue": "={{ $json.success === true && $json.hostname === 'ajsaavedra.com' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "1bedd1a4-704b-50ec-b9eb-36b22da85cb1",
+      "name": "Preparar fila",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        380,
+        -150
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const p=$('Validar solicitud').first().json;\n// Evitar inyección de fórmulas en Sheets, incluso si alguien altera el HTML del formulario.\nconst protect=(v)=> {let s=String(v||'');if (/^[\\s]*[=+\\-@]/.test(s)) s=\"'\"+s;return s;};\nreturn [{json:{\n id:`un-${Date.now()}-${Math.floor(Math.random()*10000)}`,\n fecha:new Date().toISOString(),\n tipo:p.tipo,nombre:protect(p.nombre),correo:protect(p.correo),telefono:protect(p.telefono),\n programa:protect(p.programa),nivel:protect(p.nivel),modalidad:protect(p.modalidad),horario:protect(p.horario),\n mensaje:protect(p.mensaje),origen:p.origen,consentimiento:'Si',estado:'Nuevo'\n}}];"
+      }
+    },
+    {
+      "id": "a6c84a51-01e9-59fc-a8cc-40be310bac23",
+      "name": "Guardar prospecto Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        600,
+        -150
+      ],
+      "parameters": {
+        "resource": "sheet",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REEMPLAZAR_ID_DE_GOOGLE_SHEET"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Prospectos"
+        },
+        "options": {},
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $json.id }}",
+            "fecha": "={{ $json.fecha }}",
+            "tipo": "={{ $json.tipo }}",
+            "nombre": "={{ $json.nombre }}",
+            "correo": "={{ $json.correo }}",
+            "telefono": "={{ $json.telefono }}",
+            "programa": "={{ $json.programa }}",
+            "nivel": "={{ $json.nivel }}",
+            "modalidad": "={{ $json.modalidad }}",
+            "horario": "={{ $json.horario }}",
+            "mensaje": "={{ $json.mensaje }}",
+            "origen": "={{ $json.origen }}",
+            "consentimiento": "={{ $json.consentimiento }}",
+            "estado": "={{ $json.estado }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fecha",
+              "displayName": "fecha",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "tipo",
+              "displayName": "tipo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "nombre",
+              "displayName": "nombre",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "correo",
+              "displayName": "correo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "telefono",
+              "displayName": "telefono",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "programa",
+              "displayName": "programa",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "nivel",
+              "displayName": "nivel",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "modalidad",
+              "displayName": "modalidad",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "horario",
+              "displayName": "horario",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "mensaje",
+              "displayName": "mensaje",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "origen",
+              "displayName": "origen",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "consentimiento",
+              "displayName": "consentimiento",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "estado",
+              "displayName": "estado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "03fb37da-461d-58ec-82ba-c3ac9091a83a",
+      "name": "Respuesta OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        830,
+        -150
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"ok\":true}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "https://ajsaavedra.com"
+              },
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "4df463a4-8bcd-5485-acd7-6a016b51c902",
+      "name": "Respuesta datos inválidos",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -50,
+        240
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"ok\":false,\"error\":\"Completa todos los datos requeridos.\"}",
+        "options": {
+          "responseCode": 422,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "https://ajsaavedra.com"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "0867a527-97c8-59c5-a474-4667c69a7b1e",
+      "name": "Respuesta captcha inválido",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        375,
+        130
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"ok\":false,\"error\":\"No se validó la verificación de seguridad.\"}",
+        "options": {
+          "responseCode": 403,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "https://ajsaavedra.com"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook UNISITE": {
+      "main": [
+        [
+          {
+            "node": "Validar solicitud",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar solicitud": {
+      "main": [
+        [
+          {
+            "node": "Datos completos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Datos completos": {
+      "main": [
+        [
+          {
+            "node": "Verificar Cloudflare Turnstile",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respuesta datos inválidos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verificar Cloudflare Turnstile": {
+      "main": [
+        [
+          {
+            "node": "Captcha validado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Captcha validado": {
+      "main": [
+        [
+          {
+            "node": "Preparar fila",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respuesta captcha inválido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar fila": {
+      "main": [
+        [
+          {
+            "node": "Guardar prospecto Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar prospecto Sheets": {
+      "main": [
+        [
+          {
+            "node": "Respuesta OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Mexico_City"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": []
+}
